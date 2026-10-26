@@ -21,7 +21,7 @@
     footer{padding:38px 24px 48px;text-align:center;border-top:1px solid #17241e1a;color:var(--muted);font-size:12px}footer strong{color:var(--ink);font-weight:900;letter-spacing:-.04em}footer p{margin:5px 0}@keyframes spin{to{transform:rotate(360deg)}}
     @media(max-width:760px){.topbar{height:62px}.hero{padding:48px 20px 42px}.hero-copy{font-size:15px}.workspace{margin:0 12px 40px;padding:22px 14px;border-radius:19px}.section-head{align-items:flex-start}.section-head p{max-width:230px;line-height:1.4}.photo-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.photo-card{padding:6px}.photo-size{display:none}.settings-grid{grid-template-columns:1fr}.action-panel{grid-template-columns:1fr}.create-button{grid-row:auto;width:100%;order:4;margin-top:8px}.safe-note{order:2}.progress{order:3}}
     @media(max-width:390px){.privacy-pill span{display:none}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
-    .settings-grid .filename-field{grid-column:1/-1}.settings-grid input{width:100%;border:1px solid var(--line);border-radius:11px;padding:13px 14px;color:var(--ink);background:#faf9f5;outline:none}.settings-grid input:focus{border-color:var(--orange);box-shadow:0 0 0 3px #f06b3f20}.filename-hint{font-weight:400;color:#8b918d}
+    .settings-grid .filename-field{grid-column:1/-1}.settings-grid input{width:100%;border:1px solid var(--line);border-radius:11px;padding:13px 14px;color:var(--ink);background:#faf9f5;outline:none}.settings-grid input:focus{border-color:var(--orange);box-shadow:0 0 0 3px #f06b3f20}.filename-hint{font-weight:400;color:#8b918d}.download-ready{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:10px;padding:14px;border:1px solid #b7d1bd;border-radius:12px;background:#edf7ef;color:var(--green);font-size:13px}.download-ready strong{display:block;margin-bottom:3px}.download-ready span{color:var(--muted);font-size:11px}.download-link{flex:0 0 auto;padding:11px 15px;border-radius:10px;background:var(--green);color:#fff;text-decoration:none;font-weight:800;white-space:nowrap}@media(max-width:520px){.download-ready{align-items:stretch;flex-direction:column}.download-link{text-align:center}}
   </style>
 </head>
 <body>
@@ -55,6 +55,7 @@
         <button id="createBtn" class="create-button" type="button" disabled>↓ Tạo & tải PDF</button>
         <p class="safe-note">✓ Không đăng ký · Không tải lên server</p>
         <div id="progress" class="progress hidden" aria-label="Tiến trình"><div id="progressBar" class="progress-bar"></div></div>
+        <div id="downloadReady" class="download-ready hidden" role="status"><div><strong>PDF đã tạo xong</strong><span>Nếu tệp chưa tự tải, hãy nhấn nút bên cạnh.</span></div><a id="downloadLink" class="download-link" href="#">↓ Tải PDF xuống</a></div>
       </div>
     </section>
   </main>
@@ -68,9 +69,9 @@
     (() => {
       'use strict';
       const $ = (id) => document.getElementById(id);
-      const state = { photos: [], busy: false };
+      const state = { photos: [], busy: false, downloadUrl: '' };
       const pageSizes = { a4: [595.28, 841.89], letter: [612, 792] };
-      const els = { input: $('fileInput'), fileName: $('fileName'), grid: $('photoGrid'), dropzone: $('dropzone'), clear: $('clearBtn'), create: $('createBtn'), pageSize: $('pageSize'), margin: $('margin'), error: $('error'), count: $('photoCount'), pages: $('pageCount'), progress: $('progress'), progressBar: $('progressBar') };
+      const els = { input: $('fileInput'), fileName: $('fileName'), grid: $('photoGrid'), dropzone: $('dropzone'), clear: $('clearBtn'), create: $('createBtn'), pageSize: $('pageSize'), margin: $('margin'), error: $('error'), count: $('photoCount'), pages: $('pageCount'), progress: $('progress'), progressBar: $('progressBar'), downloadReady: $('downloadReady'), downloadLink: $('downloadLink') };
 
       els.fileName.value = `anh-cua-toi-${new Date().toISOString().slice(0, 10)}`;
 
@@ -80,7 +81,7 @@
       els.clear.addEventListener('click', clearAll);
       els.create.addEventListener('click', createPdf);
       els.pageSize.addEventListener('change', () => { els.margin.disabled = els.pageSize.value === 'fit'; });
-      window.addEventListener('beforeunload', () => state.photos.forEach((photo) => URL.revokeObjectURL(photo.url)));
+      window.addEventListener('beforeunload', () => { state.photos.forEach((photo) => URL.revokeObjectURL(photo.url)); if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl); });
 
       if (window.Sortable) {
         Sortable.create(els.grid, { animation: 180, handle: '.drag-handle', ghostClass: 'sortable-ghost', dragClass: 'sortable-drag', onEnd(event) { const moved = state.photos.splice(event.oldIndex, 1)[0]; state.photos.splice(event.newIndex, 0, moved); render(); } });
@@ -139,7 +140,7 @@
       async function createPdf() {
         if (!state.photos.length || state.busy) return;
         if (!window.PDFLib) { showError('Không tải được thư viện tạo PDF. Hãy kiểm tra mạng rồi thử lại.'); return; }
-        state.busy = true; hideError(); els.progress.classList.remove('hidden'); setProgress(0, state.photos.length); els.create.disabled = true;
+        state.busy = true; hideError(); els.downloadReady.classList.add('hidden'); if (state.downloadUrl) { URL.revokeObjectURL(state.downloadUrl); state.downloadUrl = ''; } els.progress.classList.remove('hidden'); setProgress(0, state.photos.length); els.create.disabled = true;
         try {
           const pdf = await PDFLib.PDFDocument.create();
           for (let i = 0; i < state.photos.length; i++) {
@@ -154,7 +155,8 @@
           els.create.textContent = 'Đang đóng gói PDF…'; const bytes = await pdf.save({ useObjectStreams: true }); const blob = new Blob([bytes], { type: 'application/pdf' }); const url = URL.createObjectURL(blob);
           const requestedName = els.fileName.value.trim().replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').replace(/[. ]+$/g, '');
           const safeName = requestedName || `anh-cua-toi-${new Date().toISOString().slice(0, 10)}`;
-          const link = document.createElement('a'); link.href = url; link.download = `${safeName}.pdf`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+          state.downloadUrl = url; els.downloadLink.href = url; els.downloadLink.download = `${safeName}.pdf`; els.downloadLink.setAttribute('target', '_blank'); els.downloadReady.classList.remove('hidden');
+          const link = document.createElement('a'); link.href = url; link.download = `${safeName}.pdf`; document.body.appendChild(link); link.click(); link.remove();
         } catch (error) { showError(error && error.message ? error.message : 'Có lỗi khi tạo PDF. Vui lòng thử lại.'); }
         finally { state.busy = false; els.create.innerHTML = '↓ Tạo & tải PDF'; els.create.disabled = !state.photos.length; setTimeout(() => els.progress.classList.add('hidden'), 800); }
       }
